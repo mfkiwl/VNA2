@@ -6,21 +6,25 @@
 #include <QToolBar>
 #include "Calibration/calkit.h"
 #include <QMessageBox>
+#include "deembeddingoption.h"
 
 namespace Ui {
 class PortExtensionEditDialog;
 }
 
-class PortExtension : public QObject
+class PortExtension : public DeembeddingOption
 {
     Q_OBJECT
 public:
     PortExtension();
-    void applyToMeasurement(Protocol::Datapoint& d);
-    QToolBar *createToolbar();
+    void transformDatapoint(Protocol::Datapoint& d) override;
     void setCalkit(Calkit *kit);
+    Type getType() override {return Type::PortExtension;}
+    nlohmann::json toJSON() override;
+    void fromJSON(nlohmann::json j) override;
 public slots:
-    void edit();
+    void edit() override;
+    void measurementCompleted(std::vector<Protocol::Datapoint> m) override;
 
 private:
     void startMeasurement();
@@ -37,11 +41,11 @@ private:
 
     // status variables for automatic measurements
     Calkit *kit;
-    bool measuring;
+//    bool measuring;
     bool isPort1;
     bool isOpen;
     bool isIdeal;
-    std::vector<Protocol::Datapoint> measurements;
+//    std::vector<Protocol::Datapoint> measurements;
     QMessageBox *msgBox;
     Ui::PortExtensionEditDialog *ui;
 };

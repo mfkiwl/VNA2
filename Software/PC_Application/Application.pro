@@ -24,6 +24,7 @@ HEADERS += \
     SpectrumAnalyzer/tracewidgetsa.h \
     Tools/eseries.h \
     Tools/impedancematchdialog.h \
+    Tools/parameters.h \
     Traces/Math/dft.h \
     Traces/Math/expression.h \
     Traces/Math/medianfilter.h \
@@ -77,7 +78,6 @@ HEADERS += \
     Traces/Math/parser/utGeneric.h \
     Traces/Math/tdr.h \
     Traces/Math/tracemath.h \
-    Traces/Math/tracematheditdialog.h \
     Traces/Math/windowfunction.h \
     Traces/fftcomplex.h \
     Traces/markerwidget.h \
@@ -96,7 +96,12 @@ HEADERS += \
     Traces/xyplotaxisdialog.h \
     Util/qpointervariant.h \
     Util/util.h \
-    VNA/portextension.h \
+    VNA/Deembedding/deembedding.h \
+    VNA/Deembedding/deembeddingdialog.h \
+    VNA/Deembedding/deembeddingoption.h \
+    VNA/Deembedding/matchingnetwork.h \
+    VNA/Deembedding/portextension.h \
+    VNA/Deembedding/twothru.h \
     VNA/tracewidgetvna.h \
     VNA/vna.h \
     appwindow.h \
@@ -135,6 +140,7 @@ SOURCES += \
     SpectrumAnalyzer/tracewidgetsa.cpp \
     Tools/eseries.cpp \
     Tools/impedancematchdialog.cpp \
+    Tools/parameters.cpp \
     Traces/Math/dft.cpp \
     Traces/Math/expression.cpp \
     Traces/Math/medianfilter.cpp \
@@ -177,7 +183,6 @@ SOURCES += \
     Traces/Math/parser/mpVariable.cpp \
     Traces/Math/tdr.cpp \
     Traces/Math/tracemath.cpp \
-    Traces/Math/tracematheditdialog.cpp \
     Traces/Math/windowfunction.cpp \
     Traces/fftcomplex.cpp \
     Traces/markerwidget.cpp \
@@ -194,7 +199,12 @@ SOURCES += \
     Traces/tracewidget.cpp \
     Traces/tracexyplot.cpp \
     Traces/xyplotaxisdialog.cpp \
-    VNA/portextension.cpp \
+    VNA/Deembedding/deembedding.cpp \
+    VNA/Deembedding/deembeddingdialog.cpp \
+    VNA/Deembedding/deembeddingoption.cpp \
+    VNA/Deembedding/matchingnetwork.cpp \
+    VNA/Deembedding/portextension.cpp \
+    VNA/Deembedding/twothru.cpp \
     VNA/tracewidgetvna.cpp \
     VNA/vna.cpp \
     appwindow.cpp \
@@ -234,7 +244,6 @@ FORMS += \
     Traces/Math/newtracemathdialog.ui \
     Traces/Math/tdrdialog.ui \
     Traces/Math/tdrexplanationwidget.ui \
-    Traces/Math/tracematheditdialog.ui \
     Traces/markerwidget.ui \
     Traces/smithchartdialog.ui \
     Traces/tracecsvexport.ui \
@@ -243,7 +252,11 @@ FORMS += \
     Traces/tracetouchstoneexport.ui \
     Traces/tracewidget.ui \
     Traces/xyplotaxisdialog.ui \
-    VNA/portextensioneditdialog.ui \
+    VNA/Deembedding/deembeddingdialog.ui \
+    VNA/Deembedding/matchingnetworkdialog.ui \
+    VNA/Deembedding/measurementdialog.ui \
+    VNA/Deembedding/portextensioneditdialog.ui \
+    VNA/Deembedding/twothrudialog.ui \
     main.ui \
     preferencesdialog.ui
 

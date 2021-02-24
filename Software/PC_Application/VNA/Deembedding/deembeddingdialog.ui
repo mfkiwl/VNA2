@@ -1,60 +1,36 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
- <class>TraceMathEditDialog</class>
- <widget class="QDialog" name="TraceMathEditDialog">
-  <property name="windowModality">
-   <enum>Qt::ApplicationModal</enum>
-  </property>
+ <class>DeembeddingDialog</class>
+ <widget class="QDialog" name="DeembeddingDialog">
   <property name="geometry">
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>903</width>
-    <height>350</height>
+    <width>519</width>
+    <height>380</height>
    </rect>
   </property>
   <property name="windowTitle">
-   <string>Math functions</string>
+   <string>De-embedding</string>
   </property>
   <property name="modal">
    <bool>true</bool>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout_2">
    <item>
+    <widget class="QLabel" name="label">
+     <property name="text">
+      <string>Add/configure de-embedding options in this list. Although not required in most scenarios, multiple options can be active at once; de-embedding will be performed top-to-bottom. Therefore, the bottommost entry is the de-embedding that is closest to the DUT, whereas the topmost option is closest to the physical VNA ports.</string>
+     </property>
+     <property name="wordWrap">
+      <bool>true</bool>
+     </property>
+    </widget>
+   </item>
+   <item>
     <layout class="QHBoxLayout" name="horizontalLayout">
      <item>
-      <widget class="QTableView" name="view">
-       <property name="horizontalScrollBarPolicy">
-        <enum>Qt::ScrollBarAsNeeded</enum>
-       </property>
-       <property name="dragEnabled">
-        <bool>true</bool>
-       </property>
-       <property name="dragDropMode">
-        <enum>QAbstractItemView::InternalMove</enum>
-       </property>
-       <property name="selectionMode">
-        <enum>QAbstractItemView::SingleSelection</enum>
-       </property>
-       <property name="selectionBehavior">
-        <enum>QAbstractItemView::SelectRows</enum>
-       </property>
-       <property name="showGrid">
-        <bool>false</bool>
-       </property>
-       <attribute name="horizontalHeaderMinimumSectionSize">
-        <number>20</number>
-       </attribute>
-       <attribute name="horizontalHeaderDefaultSectionSize">
-        <number>70</number>
-       </attribute>
-       <attribute name="horizontalHeaderStretchLastSection">
-        <bool>false</bool>
-       </attribute>
-       <attribute name="verticalHeaderVisible">
-        <bool>false</bool>
-       </attribute>
-      </widget>
+      <widget class="QListView" name="view"/>
      </item>
      <item>
       <layout class="QVBoxLayout" name="verticalLayout">
@@ -84,7 +60,7 @@
           <bool>false</bool>
          </property>
          <property name="sizePolicy">
-          <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+          <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
            <horstretch>0</horstretch>
            <verstretch>0</verstretch>
           </sizepolicy>
@@ -113,8 +89,8 @@
           <string/>
          </property>
          <property name="icon">
-          <iconset theme="go-up">
-           <normaloff>.</normaloff>.</iconset>
+          <iconset theme="go-up" resource="../../icons.qrc">
+           <normaloff>:/icons/up.png</normaloff>:/icons/up.png</iconset>
          </property>
         </widget>
        </item>
@@ -130,8 +106,31 @@
           <string/>
          </property>
          <property name="icon">
-          <iconset theme="go-down">
-           <normaloff>.</normaloff>.</iconset>
+          <iconset theme="go-down" resource="../../icons.qrc">
+           <normaloff>:/icons/down.png</normaloff>:/icons/down.png</iconset>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="bEdit">
+         <property name="enabled">
+          <bool>false</bool>
+         </property>
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
+         <property name="toolTip">
+          <string>Edit</string>
+         </property>
+         <property name="text">
+          <string/>
+         </property>
+         <property name="icon">
+          <iconset theme="accessories-text-editor" resource="../../icons.qrc">
+           <normaloff>:/icons/edit.png</normaloff>:/icons/edit.png</iconset>
          </property>
         </widget>
        </item>
@@ -164,22 +163,5 @@
  <resources>
   <include location="../../icons.qrc"/>
  </resources>
- <connections>
-  <connection>
-   <sender>buttonBox</sender>
-   <signal>accepted()</signal>
-   <receiver>TraceMathEditDialog</receiver>
-   <slot>accept()</slot>
-   <hints>
-    <hint type="sourcelabel">
-     <x>216</x>
-     <y>280</y>
-    </hint>
-    <hint type="destinationlabel">
-     <x>216</x>
-     <y>150</y>
-    </hint>
-   </hints>
-  </connection>
- </connections>
+ <connections/>
 </ui>
