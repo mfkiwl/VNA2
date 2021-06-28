@@ -5,6 +5,8 @@
 #include <QScrollBar>
 #include <QSettings>
 #include <functional>
+#include "Util/util.h"
+#include "Marker/marker.h"
 
 using namespace std;
 
@@ -78,6 +80,7 @@ void Trace::addData(const Trace::Data& d) {
                 *lower = d;
             }
             break;
+        default: break;
         }
     } else {
         // insert at this position
@@ -258,14 +261,16 @@ void Trace::setColor(QColor color) {
     }
 }
 
-void Trace::addMarker(TraceMarker *m)
+void Trace::addMarker(Marker *m)
 {
     markers.insert(m);
+    connect(m, &Marker::dataFormatChanged, this, &Trace::markerFormatChanged);
     emit markerAdded(m);
 }
 
-void Trace::removeMarker(TraceMarker *m)
+void Trace::removeMarker(Marker *m)
 {
+    disconnect(m, &Marker::dataFormatChanged, this, &Trace::markerFormatChanged);
     markers.erase(m);
     emit markerRemoved(m);
 }
@@ -395,7 +400,7 @@ void Trace::fromJSON(nlohmann::json j)
             continue;
         }
         qDebug() << "Creating math operation of type:" << operation;
-        auto op = TraceMath::createMath(type);
+        auto op = TraceMath::createMath(type)[0];
         if(jm.contains("settings")) {
             op->fromJSON(jm["settings"]);
         }
@@ -512,6 +517,94 @@ std::vector<Protocol::Datapoint> Trace::assembleDatapoints(const Trace &S11, con
     return ret;
 }
 
+Trace::LiveParameter Trace::ParameterFromString(QString s)
+{
+    s = s.toUpper();
+    if(s == "S11") {
+        return LiveParameter::S11;
+    } else if(s == "S12") {
+        return LiveParameter::S12;
+    } else if(s == "S21") {
+        return LiveParameter::S21;
+    } else if(s == "S22") {
+        return LiveParameter::S22;
+    } else if(s == "PORT1") {
+        return LiveParameter::Port1;
+    } else if(s == "PORT2") {
+        return LiveParameter::Port2;
+    } else {
+        return LiveParameter::Invalid;
+    }
+}
+
+QString Trace::ParameterToString(LiveParameter p)
+{
+    switch(p) {
+    case Trace::LiveParameter::S11: return "S11";
+    case Trace::LiveParameter::S12: return "S12";
+    case Trace::LiveParameter::S21: return "S21";
+    case Trace::LiveParameter::S22: return "S22";
+    case Trace::LiveParameter::Port1: return "Port1";
+    case Trace::LiveParameter::Port2: return "Port2";
+    default: return "Invalid";
+    }
+}
+
+bool Trace::isVNAParameter(Trace::LiveParameter p)
+{
+    switch(p) {
+    case Trace::LiveParameter::S11:
+    case Trace::LiveParameter::S12:
+    case Trace::LiveParameter::S21:
+    case Trace::LiveParameter::S22:
+        return true;
+    case Trace::LiveParameter::Port1:
+    case Trace::LiveParameter::Port2:
+    default:
+        return false;
+    }
+}
+
+bool Trace::isSAParamater(Trace::LiveParameter p)
+{
+    switch(p) {
+    case Trace::LiveParameter::S11:
+    case Trace::LiveParameter::S12:
+    case Trace::LiveParameter::S21:
+    case Trace::LiveParameter::S22:
+        return false;
+    case Trace::LiveParameter::Port1:
+    case Trace::LiveParameter::Port2:
+        return true;
+    default:
+        return false;
+    }
+}
+
+Trace::LivedataType Trace::TypeFromString(QString s)
+{
+    s = s.toUpper();
+    if(s == "OVERWRITE") {
+        return LivedataType::Overwrite;
+    } else if(s == "MAXHOLD") {
+        return LivedataType::MaxHold;
+    } else if(s == "MINHOLD") {
+        return LivedataType::MinHold;
+    } else {
+        return LivedataType::Invalid;
+    }
+}
+
+QString Trace::TypeToString(Trace::LivedataType t)
+{
+    switch(t) {
+    case Trace::LivedataType::Overwrite: return "Overwrite";
+    case Trace::LivedataType::MaxHold: return "MaxHold";
+    case Trace::LivedataType::MinHold: return "MinHold";
+    default: return "Invalid";
+    }
+}
+
 void Trace::updateLastMath(vector<MathInfo>::reverse_iterator start)
 {
     TraceMath *newLast = nullptr;
@@ -559,7 +652,7 @@ void Trace::setCalibration(bool value)
     calibration = value;
 }
 
-std::set<TraceMarker *> Trace::getMarkers() const
+std::set<Marker *> Trace::getMarkers() const
 {
     return markers;
 }
@@ -579,12 +672,18 @@ bool Trace::isVisible()
 
 void Trace::pause()
 {
-    paused = true;
+    if(!paused) {
+        paused = true;
+        emit pauseChanged();
+    }
 }
 
 void Trace::resume()
 {
-    paused = false;
+    if(paused) {
+        paused = false;
+        emit pauseChanged();
+    }
 }
 
 bool Trace::isPaused()
@@ -633,6 +732,18 @@ void Trace::addMathOperation(TraceMath *math)
     MathInfo info = {.math = math, .enabled = true};
     math->assignInput(lastMath);
     mathOps.push_back(info);
+    updateLastMath(mathOps.rbegin());
+}
+
+void Trace::addMathOperations(std::vector<TraceMath *> maths)
+{
+    TraceMath *input = lastMath;
+    for(auto m : maths) {
+        MathInfo info = {.math = m, .enabled = true};
+        m->assignInput(input);
+        input = m;
+        mathOps.push_back(info);
+    }
     updateLastMath(mathOps.rbegin());
 }
 
@@ -760,7 +871,7 @@ std::vector<double> Trace::findPeakFrequencies(unsigned int maxPeaks, double min
     double max_dbm = -200.0;
     double min_dbm = 200.0;
     for(auto d : lastMath->rData()) {
-        double dbm = 20*log10(abs(d.y));
+        double dbm = Util::SparamTodB(d.y);
         if((dbm >= max_dbm) && (min_dbm <= dbm - minValley)) {
             // potential peak frequency
             frequency = d.x;
@@ -811,6 +922,12 @@ Trace::Data Trace::sample(unsigned int index, SampleType type) const
     return data;
 }
 
+Trace::Data Trace::interpolatedSample(double x)
+{
+    auto data = lastMath->getInterpolatedSample(x);
+    return data;
+}
+
 QString Trace::getFilename() const
 {
     return filename;
@@ -828,7 +945,7 @@ double Trace::getNoise(double frequency)
         return std::numeric_limits<double>::quiet_NaN();
     }
     // convert to dbm
-    auto dbm = 20*log10(abs(lastMath->getInterpolatedSample(frequency).y));
+    auto dbm = Util::SparamTodB(lastMath->getInterpolatedSample(frequency).y);
     // convert to 1Hz bandwidth
     dbm -= 10*log10(settings.SA.RBW);
     return dbm;

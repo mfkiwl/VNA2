@@ -9,8 +9,10 @@
 #include "Device/device.h"
 #include <functional>
 #include "Deembedding/deembedding.h"
+#include "scpi.h"
+#include "Traces/tracewidget.h"
 
-class VNA : public Mode
+class VNA : public Mode, public SCPINode
 {
     Q_OBJECT
 public:
@@ -50,6 +52,8 @@ signals:
     void CalibrationMeasurementComplete(Calibration::Measurement m);
 
 private:
+    bool CalibrationMeasurementActive() { return calWaitFirst || calMeasuring; }
+    void SetupSCPI();
     void UpdateAverageCount();
     void SettingsChanged(std::function<void (Device::TransmissionResult)> cb = nullptr);
     void ConstrainAndUpdateFrequencies();
@@ -64,7 +68,8 @@ private:
     Protocol::SweepSettings settings;
     unsigned int averages;
     TraceModel traceModel;
-    TraceMarkerModel *markerModel;
+    TraceWidget *traceWidget;
+    MarkerModel *markerModel;
     Averaging average;
 
     // Calibration

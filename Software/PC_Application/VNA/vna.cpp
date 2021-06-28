@@ -31,7 +31,7 @@
 #include "CustomWidgets/tilewidget.h"
 #include "CustomWidgets/siunitedit.h"
 #include <QDockWidget>
-#include "Traces/markerwidget.h"
+#include "Traces/Marker/markerwidget.h"
 #include "Tools/impedancematchdialog.h"
 #include "Calibration/calibrationtracedialog.h"
 #include "ui_main.h"
@@ -49,6 +49,7 @@
 
 VNA::VNA(AppWindow *window)
     : Mode(window, "Vector Network Analyzer"),
+      SCPINode("VNA"),
       deembedding(traceModel),
       central(new TileWidget(traceModel))
 {
@@ -415,10 +416,11 @@ VNA::VNA(AppWindow *window)
 //    toolbars.insert(tb_portExtension);
 
 
-    markerModel = new TraceMarkerModel(traceModel, this);
+    markerModel = new MarkerModel(traceModel, this);
 
     auto tracesDock = new QDockWidget("Traces");
-    tracesDock->setWidget(new TraceWidgetVNA(traceModel, cal, deembedding));
+    traceWidget = new TraceWidgetVNA(traceModel, cal, deembedding);
+    tracesDock->setWidget(traceWidget);
     window->addDockWidget(Qt::LeftDockWidgetArea, tracesDock);
     docks.insert(tracesDock);
 
@@ -429,6 +431,8 @@ VNA::VNA(AppWindow *window)
     markerDock->setWidget(markerWidget);
     window->addDockWidget(Qt::BottomDockWidgetArea, markerDock);
     docks.insert(markerDock);
+
+    SetupSCPI();
 
     // Set initial sweep settings
     auto pref = Preferences::getInstance();
@@ -645,11 +649,11 @@ void VNA::UpdateAverageCount()
 void VNA::SettingsChanged(std::function<void (Device::TransmissionResult)> cb)
 {
     settings.suppressPeaks = Preferences::getInstance().Acquisition.suppressPeaks ? 1 : 0;
-    if(window->getDevice()) {
+    if(window->getDevice() && Mode::getActiveMode() == this) {
         window->getDevice()->Configure(settings, [=](Device::TransmissionResult res){
             // device received command, reset traces now
             average.reset(settings.points);
-            traceModel.clearVNAData();
+            traceModel.clearLiveData();
             UpdateAverageCount();
             UpdateCalWidget();
             if(cb) {
@@ -704,15 +708,16 @@ void VNA::SetCenterFreq(double freq)
 
 void VNA::SetSpan(double span)
 {
+    auto maxFreq = Preferences::getInstance().Acquisition.harmonicMixing ? Device::Info().limits_maxFreqHarmonic : Device::Info().limits_maxFreq;
     auto old_center = (settings.f_start + settings.f_stop) / 2;
     if(old_center < Device::Info().limits_minFreq + span / 2) {
         // would shift start frequency below minimum
         settings.f_start = Device::Info().limits_minFreq;
         settings.f_stop = Device::Info().limits_minFreq + span;
-    } else if(old_center > Device::Info().limits_maxFreq - span / 2) {
+    } else if(old_center > maxFreq - span / 2) {
         // would shift stop frequency above maximum
-        settings.f_start = Device::Info().limits_maxFreq - span;
-        settings.f_stop = Device::Info().limits_maxFreq;
+        settings.f_start = maxFreq - span;
+        settings.f_stop = maxFreq;
     } else {
         settings.f_start = old_center - span / 2;
          settings.f_stop = settings.f_start + span;
@@ -833,7 +838,7 @@ void VNA::ApplyCalibration(Calibration::Type type)
         }
     } else {
         // Not all required traces available
-        InformationBox::ShowMessage("Missing calibration measurements", "Not all calibration measurements for this type of calibration have been taken. The calibration can be enabled after the missing measurements have been acquired.");
+        InformationBox::ShowMessageBlocking("Missing calibration measurements", "Not all calibration measurements for this type of calibration have been taken. The calibration can be enabled after the missing measurements have been acquired.");
         DisableCalibration(true);
         StartCalibrationDialog(type);
     }
@@ -873,6 +878,161 @@ void VNA::StartCalibrationMeasurement(Calibration::Measurement m)
         calMeasuring = true;
     });
     calEdited = true;
+}
+
+void VNA::SetupSCPI()
+{
+    auto scpi_freq = new SCPINode("FREQuency");
+    SCPINode::add(scpi_freq);
+    scpi_freq->add(new SCPICommand("SPAN", [=](QStringList params) -> QString {
+        unsigned long newval;
+        if(!SCPI::paramToULong(params, 0, newval)) {
+            return "ERROR";
+        } else {
+            SetSpan(newval);
+            return "";
+        }
+    }, [=](QStringList) -> QString {
+        return QString::number(settings.f_stop - settings.f_start);
+    }));
+    scpi_freq->add(new SCPICommand("START", [=](QStringList params) -> QString {
+        unsigned long newval;
+        if(!SCPI::paramToULong(params, 0, newval)) {
+            return "ERROR";
+        } else {
+            SetStartFreq(newval);
+            return "";
+        }
+    }, [=](QStringList) -> QString {
+        return QString::number(settings.f_start);
+    }));
+    scpi_freq->add(new SCPICommand("CENTer", [=](QStringList params) -> QString {
+        unsigned long newval;
+        if(!SCPI::paramToULong(params, 0, newval)) {
+            return "ERROR";
+        } else {
+            SetCenterFreq(newval);
+            return "";
+        }
+    }, [=](QStringList) -> QString {
+        return QString::number((settings.f_start + settings.f_stop)/2);
+    }));
+    scpi_freq->add(new SCPICommand("STOP", [=](QStringList params) -> QString {
+        unsigned long newval;
+        if(!SCPI::paramToULong(params, 0, newval)) {
+            return "ERROR";
+        } else {
+            SetStopFreq(newval);
+            return "";
+        }
+    }, [=](QStringList) -> QString {
+        return QString::number(settings.f_stop);
+    }));
+    scpi_freq->add(new SCPICommand("FULL", [=](QStringList params) -> QString {
+        Q_UNUSED(params)
+        SetFullSpan();
+        return "";
+    }, nullptr));
+    auto scpi_acq = new SCPINode("ACQuisition");
+    SCPINode::add(scpi_acq);
+    scpi_acq->add(new SCPICommand("IFBW", [=](QStringList params) -> QString {
+        unsigned long newval;
+        if(!SCPI::paramToULong(params, 0, newval)) {
+            return "ERROR";
+        } else {
+            SetIFBandwidth(newval);
+            return "";
+        }
+    }, [=](QStringList) -> QString {
+        return QString::number(settings.if_bandwidth);
+    }));
+    scpi_acq->add(new SCPICommand("POINTS", [=](QStringList params) -> QString {
+        unsigned long newval;
+        if(!SCPI::paramToULong(params, 0, newval)) {
+            return "ERROR";
+        } else {
+            SetPoints(newval);
+            return "";
+        }
+    }, [=](QStringList) -> QString {
+        return QString::number(settings.points);
+    }));
+    scpi_acq->add(new SCPICommand("AVG", [=](QStringList params) -> QString {
+        unsigned long newval;
+        if(!SCPI::paramToULong(params, 0, newval)) {
+            return "ERROR";
+        } else {
+            SetAveraging(newval);
+            return "";
+        }
+    }, [=](QStringList) -> QString {
+        return QString::number(averages);
+    }));
+    scpi_acq->add(new SCPICommand("AVGLEVel", nullptr, [=](QStringList) -> QString {
+        return QString::number(average.getLevel());
+    }));
+    scpi_acq->add(new SCPICommand("FINished", nullptr, [=](QStringList) -> QString {
+        return average.getLevel() == averages ? "TRUE" : "FALSE";
+    }));
+    auto scpi_stim = new SCPINode("STIMulus");
+    SCPINode::add(scpi_stim);
+    scpi_stim->add(new SCPICommand("LVL", [=](QStringList params) -> QString {
+        double newval;
+        if(!SCPI::paramToDouble(params, 0, newval)) {
+            return "ERROR";
+        } else {
+            SetSourceLevel(newval);
+            return "";
+        }
+    }, [=](QStringList) -> QString {
+        return QString::number(settings.cdbm_excitation / 100.0);
+    }));
+    SCPINode::add(traceWidget);
+    auto scpi_cal = new SCPINode("CALibration");
+    SCPINode::add(scpi_cal);
+    scpi_cal->add(new SCPICommand("TYPE", [=](QStringList params) -> QString {
+        if(params.size() != 1) {
+            return "ERROR";
+        } else {
+            auto type = Calibration::TypeFromString(params[0].replace('_', ' '));
+            if(type == Calibration::Type::Last) {
+                // failed to parse string
+                return "ERROR";
+            } else if(type == Calibration::Type::None) {
+                DisableCalibration();
+            } else {
+                // check if calibration can be activated
+                if(cal.calculationPossible(type)) {
+                    ApplyCalibration(type);
+                } else {
+                    return "ERROR";
+                }
+            }
+        }
+        return "";
+    }, [=](QStringList) -> QString {
+        auto ret = Calibration::TypeToString(cal.getType());
+        ret.replace(' ', '_');
+        return ret;
+    }));
+    scpi_cal->add(new SCPICommand("MEASure", [=](QStringList params) -> QString {
+        if(params.size() != 1 || CalibrationMeasurementActive() || !window->getDevice() || Mode::getActiveMode() != this) {
+            // no measurement specified, still busy or invalid mode
+            return "ERROR";
+        } else {
+            auto meas = Calibration::MeasurementFromString(params[0].replace('_', ' '));
+            if(meas == Calibration::Measurement::Last) {
+                // failed to parse string
+                return "ERROR";
+            } else {
+                StartCalibrationMeasurement(meas);
+            }
+        }
+        return "";
+    }, nullptr));
+    scpi_cal->add(new SCPICommand("BUSy", nullptr, [=](QStringList) -> QString {
+        return CalibrationMeasurementActive() ? "TRUE" : "FALSE";
+    }));
 }
 
 void VNA::ConstrainAndUpdateFrequencies()
@@ -939,7 +1099,7 @@ void VNA::StartCalibrationDialog(Calibration::Type type)
     connect(this, &VNA::CalibrationMeasurementComplete, traceDialog, &CalibrationTraceDialog::measurementComplete);
     connect(traceDialog, &CalibrationTraceDialog::calibrationInvalidated, [=](){
        DisableCalibration(true);
-       InformationBox::ShowMessage("Calibration disabled", "The currently active calibration is no longer supported by the available measurements and was disabled.");
+       InformationBox::ShowMessageBlocking("Calibration disabled", "The currently active calibration is no longer supported by the available measurements and was disabled.");
     });
     traceDialog->show();
 }

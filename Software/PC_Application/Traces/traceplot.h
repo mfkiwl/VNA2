@@ -44,16 +44,22 @@ protected:
     virtual bool supported(Trace *t) = 0;
     std::map<Trace*, bool> traces;
     QMenu *contextmenu;
+    QPoint contextmenuClickpoint; // mouse coordinates when the contextmenu was invoked
     QTime lastUpdate;
+    QTimer replotTimer;
     bool markedForDeletion;
     static std::set<TracePlot*> plots;
 
-    virtual QPoint markerToPixel(TraceMarker *m) = 0;
-    virtual double nearestTracePoint(Trace *t, QPoint pixel) = 0;
+    virtual QPoint markerToPixel(Marker *m) = 0;
+    virtual double nearestTracePoint(Trace *t, QPoint pixel, double *distance = nullptr) = 0;
     void mousePressEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
     void leaveEvent(QEvent *event) override;
+
+    Marker *markerAtPosition(QPoint p, bool onlyMovable = false);
+
+    void createMarkerAtPosition(QPoint p);
 
     // handle trace drops
     virtual bool dropSupported(Trace *t) = 0;
@@ -68,16 +74,20 @@ protected slots:
     void traceDeleted(Trace *t);
     void triggerReplot();
     void checkIfStillSupported(Trace *t);
-    virtual void markerAdded(TraceMarker *m);
-    virtual void markerRemoved(TraceMarker *m);
+    virtual void markerAdded(Marker *m);
+    virtual void markerRemoved(Marker *m);
+    virtual bool xCoordinateVisible(double x) = 0;
 protected:
     static constexpr unsigned int marginTop = 20;
     static constexpr unsigned int marginBottom = 0;
     static constexpr unsigned int marginLeft = 0;
     static constexpr unsigned int marginRight = 0;
+
+    static constexpr unsigned int marginMarkerData = 150;
+
     double sweep_fmin, sweep_fmax;
     TraceModel &model;
-    TraceMarker *selectedMarker;
+    Marker *selectedMarker;
 
     bool dropPending;
     QPoint dropPosition;

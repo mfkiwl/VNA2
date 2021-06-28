@@ -22,7 +22,11 @@ void TraceModel::addTrace(Trace *t)
 {
     beginInsertRows(QModelIndex(), traces.size(), traces.size());
     connect(t, &Trace::nameChanged, [=]() {
-       emit traceNameChanged(t);
+        emit traceNameChanged(t);
+        emit dataChanged(createIndex(0, 0), createIndex(traces.size() - 1, ColIndexLast - 1));
+    });
+    connect(t, &Trace::pauseChanged, [=](){
+        emit dataChanged(createIndex(0, 0), createIndex(traces.size() - 1, ColIndexLast - 1));
     });
     traces.push_back(t);
     endInsertRows();
@@ -191,7 +195,7 @@ void TraceModel::fromJSON(nlohmann::json j)
     }
 }
 
-void TraceModel::clearVNAData()
+void TraceModel::clearLiveData()
 {
     for(auto t : traces) {
         if (t->isLive()) {
@@ -237,4 +241,14 @@ void TraceModel::addSAData(const Protocol::SpectrumAnalyzerResult& d, const Prot
             t->addData(td, settings);
         }
     }
+}
+
+MarkerModel *TraceModel::getMarkerModel() const
+{
+    return markerModel;
+}
+
+void TraceModel::setMarkerModel(MarkerModel *value)
+{
+    markerModel = value;
 }

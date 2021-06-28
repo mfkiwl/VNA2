@@ -70,7 +70,7 @@ PERIFLIB_SOURCES =
 #######################################
 # binaries
 #######################################
-BINPATH = /usr/bin
+BINPATH ?= /usr/bin
 PREFIX = arm-none-eabi-
 CC = $(BINPATH)/$(PREFIX)gcc
 CXX  = $(BINPATH)/$(PREFIX)g++
@@ -99,9 +99,9 @@ MCU = $(CPU) -mthumb $(FLOAT-ABI) $(FPU)
 
 # C defines
 C_DEFS =  \
--DFW_MAJOR=0 \
+-DFW_MAJOR=1 \
 -DFW_MINOR=1 \
--DFW_PATCH=0 \
+-DFW_PATCH=1 \
 -DUSE_FULL_LL_DRIVER \
 -DHW_REVISION="'B'" \
 -D__weak="__attribute__((weak))" \

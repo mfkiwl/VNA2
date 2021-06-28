@@ -27,6 +27,10 @@ Calkit::Calkit()
 
 void Calkit::toFile(QString filename)
 {
+    if(!filename.endsWith(".calkit")) {
+        filename.append(".calkit");
+    }
+
     qDebug() << "Saving calkit to file" << filename;
 
     TransformPathsToRelative(filename);
@@ -169,7 +173,7 @@ Calkit Calkit::fromFile(QString filename)
                      " calibration kit format. Future versions of this application might not support"
                      " it anymore. Please save the calibration kit to update to the new format");
         msg->setStandardButtons(QMessageBox::Ok);
-        msg->exec();
+        msg->show();
     }
     file.close();
 

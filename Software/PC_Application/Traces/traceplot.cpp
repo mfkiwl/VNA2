@@ -1,9 +1,11 @@
 #include "traceplot.h"
-#include "tracemarker.h"
+#include "Marker/marker.h"
 #include "preferences.h"
 #include <QPainter>
 #include <QMimeData>
 #include <QDebug>
+#include "unit.h"
+#include "Marker/markermodel.h"
 
 std::set<TracePlot*> TracePlot::plots;
 
@@ -20,6 +22,8 @@ TracePlot::TracePlot(TraceModel &model, QWidget *parent)
     markedForDeletion = false;
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     lastUpdate = QTime::currentTime();
+    replotTimer.setSingleShot(true);
+    connect(&replotTimer, &QTimer::timeout, this, qOverload<>(&TracePlot::update));
     sweep_fmin = std::numeric_limits<double>::lowest();
     sweep_fmax = std::numeric_limits<double>::max();
     // get notified when the span changes
@@ -51,6 +55,7 @@ void TracePlot::enableTrace(Trace *t, bool enabled)
             // connect signals
             connect(t, &Trace::dataChanged, this, &TracePlot::triggerReplot);
             connect(t, &Trace::visibilityChanged, this, &TracePlot::triggerReplot);
+            connect(t, &Trace::markerFormatChanged, this, &TracePlot::triggerReplot);
             connect(t, &Trace::markerAdded, this, &TracePlot::markerAdded);
             connect(t, &Trace::markerRemoved, this, &TracePlot::markerRemoved);
             connect(t, &Trace::typeChanged, this, &TracePlot::checkIfStillSupported);
@@ -58,6 +63,7 @@ void TracePlot::enableTrace(Trace *t, bool enabled)
             // disconnect from notifications
             disconnect(t, &Trace::dataChanged, this, &TracePlot::triggerReplot);
             disconnect(t, &Trace::visibilityChanged, this, &TracePlot::triggerReplot);
+            disconnect(t, &Trace::markerFormatChanged, this, &TracePlot::triggerReplot);
             disconnect(t, &Trace::markerAdded, this, &TracePlot::markerAdded);
             disconnect(t, &Trace::markerRemoved, this, &TracePlot::markerRemoved);
             disconnect(t, &Trace::typeChanged, this, &TracePlot::checkIfStillSupported);
@@ -92,7 +98,17 @@ void TracePlot::initializeTraceInfo()
 
 void TracePlot::contextMenuEvent(QContextMenuEvent *event)
 {
-    contextmenu->exec(event->globalPos());
+    auto m = markerAtPosition(event->pos());
+    QMenu *menu;
+    if(m) {
+        // right click on marker, execute its contextmenu
+        menu = m->getContextMenu();
+    } else {
+        // no marker, contextmenu of graph
+        menu = contextmenu;
+        contextmenuClickpoint = event->pos();
+    }
+    menu->exec(event->globalPos());
     if(markedForDeletion) {
         emit deleted(this);
         delete this;
@@ -109,28 +125,63 @@ void TracePlot::paintEvent(QPaintEvent *event)
     p.setBackground(QBrush(pref.General.graphColors.background));
     p.fillRect(0, 0, width(), height(), QBrush(pref.General.graphColors.background));
 
-    // show names of active traces
-    QFont font = p.font();
-    font.setPixelSize(12);
-    p.setFont(font);
-    int x = 1;
+    // show names of active traces and marker data (if enabled)
+    bool hasMarkerData = false;
+    int x = 1; // xcoordinate for the next trace name
+    int y = marginTop; // ycoordinate for the next marker data
     for(auto t : traces) {
         if(!t.second || !t.first->isVisible()) {
             continue;
         }
         auto textArea = QRect(x, 0, width() - x, marginTop);
         QRect usedArea;
+        QFont font = p.font();
+        font.setPixelSize(12);
+        p.setFont(font);
         p.setPen(t.first->color());
         p.drawText(textArea, 0, t.first->name() + " ", &usedArea);
         x += usedArea.width();
-        if(x >= width()) {
-            // used up all available space
-            break;
+
+        auto tmarkers = t.first->getMarkers();
+
+        font.setPixelSize(12);
+        p.setFont(font);
+        for(auto m : tmarkers) {
+            if(!xCoordinateVisible(m->getPosition())) {
+                // marker not visible with current plot settings
+                continue;
+            }
+            if(m->getGraphDisplayFormats().size() == 0) {
+                // this marker has nothing to display
+                continue;
+            }
+            hasMarkerData = true;
+
+            auto textArea = QRect(width() - marginRight - marginMarkerData, y, width() - marginRight, y + 100);
+            p.drawText(textArea, 0, "Marker "+QString::number(m->getNumber())+m->getSuffix()+": "+m->readablePosition(), &usedArea);
+            y += usedArea.height();
+
+            for(auto f : m->getGraphDisplayFormats()) {
+                auto textArea = QRect(width() - marginRight - marginMarkerData, y, width() - marginRight, y + 100);
+                p.drawText(textArea, 0, m->readableData(f), &usedArea);
+                y += usedArea.height();
+            }
+            // leave one row empty between markers
+            y += usedArea.height();
         }
     }
 
-    p.setViewport(marginLeft, marginTop, width() - marginLeft - marginRight, height() - marginTop - marginBottom);
-    p.setWindow(0, 0, width() - marginLeft - marginRight, height() - marginTop - marginBottom);
+    unsigned int l = marginLeft;
+    unsigned int t = marginTop;
+    unsigned int w = width() - marginLeft - marginRight;
+    unsigned int h = height() - marginTop - marginBottom;
+
+    if(hasMarkerData) {
+        w -= marginMarkerData;
+    }
+
+    p.setViewport(l, t, w, h);
+    p.setWindow(0, 0, w, h);
 
     draw(p);
 }
@@ -138,35 +189,8 @@ void TracePlot::paintEvent(QPaintEvent *event)
 
 void TracePlot::mousePressEvent(QMouseEvent *event)
 {
-    auto clickPoint = event->pos() - QPoint(marginLeft, marginTop);
-    // check if click was near a marker
-    unsigned int closestDistance = numeric_limits<unsigned int>::max();
-    TraceMarker *closestMarker = nullptr;
-    for(auto t : traces) {
-        if(!t.second) {
-            // this trace is disabled, skip
-            continue;
-        }
-        auto markers = t.first->getMarkers();
-        for(auto m : markers) {
-            if(!m->isMovable()) {
-                continue;
-            }
-            auto markerPoint = markerToPixel(m);
-            if(markerPoint.isNull()) {
-                // invalid, skip
-                continue;
-            }
-            auto diff = markerPoint - clickPoint;
-            unsigned int distance = diff.x() * diff.x() + diff.y() * diff.y();
-            if(distance < closestDistance) {
-                closestDistance = distance;
-                closestMarker = m;
-            }
-        }
-    }
-    if(closestDistance <= 400) {
-        selectedMarker = closestMarker;
+    if(event->buttons() == Qt::LeftButton) {
+        selectedMarker = markerAtPosition(event->pos(), true);
     } else {
         selectedMarker = nullptr;
     }
@@ -203,6 +227,79 @@ void TracePlot::leaveEvent(QEvent *event)
     Q_UNUSED(event);
     cursorLabel->hide();
     selectedMarker = nullptr;
+}
+
+Marker *TracePlot::markerAtPosition(QPoint p, bool onlyMovable)
+{
+    auto clickPoint = p - QPoint(marginLeft, marginTop);
+    // check if click was near a marker
+    unsigned int closestDistance = numeric_limits<unsigned int>::max();
+    Marker *closestMarker = nullptr;
+    for(auto t : traces) {
+        if(!t.second) {
+            // this trace is disabled, skip
+            continue;
+        }
+        auto markers = t.first->getMarkers();
+        for(auto m : markers) {
+            if(!m->isMovable() && onlyMovable) {
+                continue;
+            }
+            auto markerPoint = markerToPixel(m);
+            if(markerPoint.isNull()) {
+                // invalid, skip
+                continue;
+            }
+            auto diff = markerPoint - clickPoint;
+            unsigned int distance = diff.x() * diff.x() + diff.y() * diff.y();
+            if(distance < closestDistance) {
+                closestDistance = distance;
+                if(m->getParent()) {
+                    closestMarker = m->getParent();
+                } else {
+                    closestMarker = m;
+                }
+            }
+        }
+    }
+    if(closestDistance <= 400) {
+        return closestMarker;
+    } else {
+        return nullptr;
+    }
+}
+
+void TracePlot::createMarkerAtPosition(QPoint p)
+{
+    // transate from point in absolute coordinates to this widget
+    p -= QPoint(marginLeft, marginTop);
+
+    double closestDistance = std::numeric_limits<double>::max();
+    Trace *trace = nullptr;
+    double xpos;
+    for(auto t : traces) {
+        if(!t.second) {
+            // trace not enabled, skip
+            continue;
+        }
+        double distance;
+        auto x = nearestTracePoint(t.first, p, &distance);
+        if(distance < closestDistance) {
+            trace = t.first;
+            xpos = x;
+            closestDistance = distance;
+        }
+    }
+    if(!trace) {
+        // failed to find trace (should not happen)
+        return;
+    }
+
+    auto markerModel = model.getMarkerModel();
+    auto marker = markerModel->createDefaultMarker();
+    marker->assignTrace(trace);
+    marker->setPosition(xpos);
+    markerModel->addMarker(marker);
 }
 
 void TracePlot::dragEnterEvent(QDragEnterEvent *event)
@@ -268,6 +365,8 @@ void TracePlot::triggerReplot()
     if (lastUpdate.msecsTo(now) >= MinUpdateInterval) {
         lastUpdate = now;
         replot();
+    } else {
+        replotTimer.start(MinUpdateInterval);
     }
 }
 
@@ -279,16 +378,16 @@ void TracePlot::checkIfStillSupported(Trace *t)
     }
 }
 
-void TracePlot::markerAdded(TraceMarker *m)
+void TracePlot::markerAdded(Marker *m)
 {
-    connect(m, &TraceMarker::dataChanged, this, &TracePlot::triggerReplot);
-    connect(m, &TraceMarker::symbolChanged, this, &TracePlot::triggerReplot);
+    connect(m, &Marker::dataChanged, this, &TracePlot::triggerReplot);
+    connect(m, &Marker::symbolChanged, this, &TracePlot::triggerReplot);
     triggerReplot();
 }
 
-void TracePlot::markerRemoved(TraceMarker *m)
+void TracePlot::markerRemoved(Marker *m)
 {
-    disconnect(m, &TraceMarker::dataChanged, this, &TracePlot::triggerReplot);
-    disconnect(m, &TraceMarker::symbolChanged, this, &TracePlot::triggerReplot);
+    disconnect(m, &Marker::dataChanged, this, &TracePlot::triggerReplot);
+    disconnect(m, &Marker::symbolChanged, this, &TracePlot::triggerReplot);
     triggerReplot();
 }

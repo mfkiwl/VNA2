@@ -76,6 +76,16 @@ PreferencesDialog::PreferencesDialog(Preferences *pref, QWidget *parent) :
        ui->AcquisitionDFTlimitRBW->setEnabled(enabled);
     });
 
+    // General page
+    if(p->TCPoverride) {
+        ui->GeneralSCPIPort->setEnabled(false);
+        ui->GeneralSCPIEnabled->setEnabled(false);
+    }
+
+    connect(ui->GeneralMarkerDataGraph, &QCheckBox::toggled, [=](bool enabled) {
+         ui->GeneralMarkerDataGraphAll->setEnabled(enabled);
+    });
+
     // Page selection
     connect(ui->treeWidget, &QTreeWidget::currentItemChanged, [=](QTreeWidgetItem *current, QTreeWidgetItem *) {
         auto name = current->text(0);
@@ -122,6 +132,10 @@ PreferencesDialog::PreferencesDialog(Preferences *pref, QWidget *parent) :
         p->General.graphColors.background = ui->GeneralGraphBackground->getColor();
         p->General.graphColors.axis = ui->GeneralGraphAxis->getColor();
         p->General.graphColors.divisions = ui->GeneralGraphDivisions->getColor();
+        p->General.markerDefault.showDataOnGraphs = ui->GeneralMarkerDataGraph->isChecked();
+        p->General.markerDefault.showAllData = ui->GeneralMarkerDataGraphAll->isChecked();
+        p->General.SCPI.enabled = ui->GeneralSCPIEnabled->isChecked();
+        p->General.SCPI.port = ui->GeneralSCPIPort->value();
         accept();
     });
 
@@ -176,6 +190,10 @@ void PreferencesDialog::setInitialGUIState()
     ui->GeneralGraphBackground->setColor(p->General.graphColors.background);
     ui->GeneralGraphAxis->setColor(p->General.graphColors.axis);
     ui->GeneralGraphDivisions->setColor(p->General.graphColors.divisions);
+    ui->GeneralMarkerDataGraph->setChecked(p->General.markerDefault.showDataOnGraphs);
+    ui->GeneralMarkerDataGraphAll->setChecked(p->General.markerDefault.showAllData);
+    ui->GeneralSCPIEnabled->setChecked(p->General.SCPI.enabled);
+    ui->GeneralSCPIPort->setValue(p->General.SCPI.port);
 
     QTreeWidgetItem *item = ui->treeWidget->topLevelItem(0);
     if (item != nullptr) {

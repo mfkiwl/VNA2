@@ -57,7 +57,7 @@ public:
     // connect to a VNA device. If serial is specified only connecting to this device, otherwise to the first one found
     Device(QString serial = QString());
     ~Device();
-    bool SendPacket(const Protocol::PacketInfo& packet, std::function<void(TransmissionResult)> cb = nullptr, unsigned int timeout = 200);
+    bool SendPacket(const Protocol::PacketInfo& packet, std::function<void(TransmissionResult)> cb = nullptr, unsigned int timeout = 500);
     bool Configure(Protocol::SweepSettings settings, std::function<void(TransmissionResult)> cb = nullptr);
     bool Configure(Protocol::SpectrumAnalyzerSettings settings);
     bool SetManual(Protocol::ManualControl manual);
@@ -75,6 +75,7 @@ signals:
     void ManualStatusReceived(Protocol::ManualStatus);
     void SpectrumResultReceived(Protocol::SpectrumAnalyzerResult);
     void AmplitudeCorrectionPointReceived(Protocol::AmplitudeCorrectionPoint);
+    void FrequencyCorrectionReceived(float ppm);
     void DeviceInfoUpdated();
     void ConnectionLost();
     void AckReceived();

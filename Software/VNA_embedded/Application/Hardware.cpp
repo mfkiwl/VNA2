@@ -92,10 +92,10 @@ bool HW::Init() {
 	Si5351.Init();
 
 	// Use Si5351 to generate reference frequencies for other PLLs and ADC
-	Si5351.SetPLL(Si5351C::PLL::A, 832000000, Si5351C::PLLSource::XTAL);
+	Si5351.SetPLL(Si5351C::PLL::A, HW::SI5351CPLLConstantFrequency, Si5351C::PLLSource::XTAL);
 	while(!Si5351.Locked(Si5351C::PLL::A));
 
-	Si5351.SetPLL(Si5351C::PLL::B, 832000000, Si5351C::PLLSource::XTAL);
+	Si5351.SetPLL(Si5351C::PLL::B, HW::SI5351CPLLAlignedFrequency, Si5351C::PLLSource::XTAL);
 	while(!Si5351.Locked(Si5351C::PLL::B));
 
 	extRefInUse = 0;
@@ -104,13 +104,13 @@ bool HW::Init() {
 
 	// Both MAX2871 get a 100MHz reference
 //	Si5351.SetBypass(SiChannel::Source, Si5351C::PLLSource::XTAL);
-	Si5351.SetCLK(SiChannel::Source, HW::PLLRef, Si5351C::PLL::A, Si5351C::DriveStrength::mA2);
+	Si5351.SetCLK(SiChannel::Source, HW::PLLRef, Si5351C::PLL::B, Si5351C::DriveStrength::mA2);
 	Si5351.Enable(SiChannel::Source);
 //	Si5351.SetBypass(SiChannel::LO1, Si5351C::PLLSource::XTAL);
-	Si5351.SetCLK(SiChannel::LO1, HW::PLLRef, Si5351C::PLL::A, Si5351C::DriveStrength::mA2);
+	Si5351.SetCLK(SiChannel::LO1, HW::PLLRef, Si5351C::PLL::B, Si5351C::DriveStrength::mA2);
 	Si5351.Enable(SiChannel::LO1);
 	// 16MHz FPGA clock
-	Si5351.SetCLK(SiChannel::FPGA, 16000000, Si5351C::PLL::A, Si5351C::DriveStrength::mA2);
+	Si5351.SetCLK(SiChannel::FPGA, HW::FPGAClkInFrequency, Si5351C::PLL::A, Si5351C::DriveStrength::mA2);
 	Si5351.Enable(SiChannel::FPGA);
 
 	// Generate second LO with Si5351
@@ -235,7 +235,7 @@ void HW::SetIdle() {
 
 HW::AmplitudeSettings HW::GetAmplitudeSettings(int16_t cdbm, uint64_t freq, bool applyCorrections, bool port2) {
 	if (applyCorrections) {
-		auto correction = AmplitudeCal::SourceCorrection(freq);
+		auto correction = Cal::SourceCorrection(freq);
 		if (port2) {
 			cdbm += correction.port2;
 		} else {
@@ -336,6 +336,10 @@ void HW::Ref::set(Protocol::ReferenceSettings s) {
 	ref = s;
 }
 
+bool HW::Ref::usingExternal() {
+	return extRefInUse;
+}
+
 void HW::Ref::update() {
 	if(extOutFreq != ref.ExtRefOuputFreq) {
 		extOutFreq = ref.ExtRefOuputFreq;
@@ -360,18 +364,18 @@ void HW::Ref::update() {
 				LOG_WARN("Forced switch to external reference but no signal detected");
 			}
 			Si5351.ConfigureCLKIn(10000000);
-			Si5351.SetPLL(Si5351C::PLL::A, 800000000, Si5351C::PLLSource::CLKIN);
-			Si5351.SetPLL(Si5351C::PLL::B, 800000000, Si5351C::PLLSource::CLKIN);
+			Si5351.SetPLL(Si5351C::PLL::A, HW::SI5351CPLLConstantFrequency, Si5351C::PLLSource::CLKIN);
+			Si5351.SetPLL(Si5351C::PLL::B, HW::SI5351CPLLAlignedFrequency, Si5351C::PLLSource::CLKIN);
 			LOG_INFO("Switched to external reference");
 			FPGA::Enable(FPGA::Periphery::ExtRefLED);
 		} else {
-			Si5351.SetPLL(Si5351C::PLL::A, 800000000, Si5351C::PLLSource::XTAL);
-			Si5351.SetPLL(Si5351C::PLL::B, 800000000, Si5351C::PLLSource::XTAL);
+			Si5351.SetPLL(Si5351C::PLL::A, HW::SI5351CPLLConstantFrequency, Si5351C::PLLSource::XTAL);
+			Si5351.SetPLL(Si5351C::PLL::B, HW::SI5351CPLLAlignedFrequency, Si5351C::PLLSource::XTAL);
 			LOG_INFO("Switched to internal reference");
 			FPGA::Disable(FPGA::Periphery::ExtRefLED);
 		}
 	}
-	constexpr uint32_t lock_timeout = 10;
+	constexpr uint32_t lock_timeout = 100;
 	uint32_t start = HAL_GetTick();
 	while(!Si5351.Locked(Si5351C::PLL::A) || !Si5351.Locked(Si5351C::PLL::A)) {
 		if(HAL_GetTick() - start > lock_timeout) {

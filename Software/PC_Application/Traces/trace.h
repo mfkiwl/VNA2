@@ -11,7 +11,7 @@
 #include "Device/device.h"
 #include "Math/tracemath.h"
 
-class TraceMarker;
+class Marker;
 
 class Trace : public TraceMath
 {
@@ -27,6 +27,7 @@ public:
         S22,
         Port1,
         Port2,
+        Invalid,
     };
 
     Trace(QString name = QString(), QColor color = Qt::darkYellow, LiveParameter live = LiveParameter::S11);
@@ -36,6 +37,7 @@ public:
         Overwrite,
         MaxHold,
         MinHold,
+        Invalid,
     };
 
 
@@ -79,12 +81,14 @@ public:
     };
 
     Data sample(unsigned int index, SampleType type = SampleType::Frequency) const;
+    // returns a (possibly interpolated sample) at a specified frequency/time
+    Data interpolatedSample(double x);
     QString getFilename() const;
     unsigned int getFileParameter() const;
     /* Returns the noise in dbm/Hz for spectrum analyzer measurements. May return NaN if calculation not possible */
     double getNoise(double frequency);
     int index(double x);
-    std::set<TraceMarker *> getMarkers() const;
+    std::set<Marker *> getMarkers() const;
     void setCalibration(bool value);
     void setReflection(bool value);
 
@@ -95,7 +99,8 @@ public:
     bool hasMathOperations(); // check if math operations are set up (not necessarily enabled)
     void enableMath(bool enable);
     // Adds a new math operation at the end of the list and enables it
-    void addMathOperation(TraceMath *mathOps);
+    void addMathOperation(TraceMath *math);
+    void addMathOperations(std::vector<TraceMath*> maths);
     // removes the math operation at the given index. Index 0 is invalid as this would be the trace itself
     void removeMathOperation(unsigned int index);
     // swaps the order of math operations at index and index+1. Does nothing if either index is invalid
@@ -130,11 +135,19 @@ public:
     // have the same number of samples and their samples must be at the same frequencies across all traces
     static std::vector<Protocol::Datapoint> assembleDatapoints(const Trace &S11, const Trace &S12, const Trace &S21, const Trace &S22);
 
+    static LiveParameter ParameterFromString(QString s);
+    static QString ParameterToString(LiveParameter p);
+    static bool isVNAParameter(LiveParameter p);
+    static bool isSAParamater(LiveParameter p);
+
+    static LivedataType TypeFromString(QString s);
+    static QString TypeToString(LivedataType t);
+
 public slots:
     void setVisible(bool visible);
     void setColor(QColor color);
-    void addMarker(TraceMarker *m);
-    void removeMarker(TraceMarker *m);
+    void addMarker(Marker *m);
+    void removeMarker(Marker *m);
 
 signals:
     void cleared(Trace *t);
@@ -143,9 +156,11 @@ signals:
     void visibilityChanged(Trace *t);
     void dataChanged();
     void nameChanged();
+    void pauseChanged();
     void colorChanged(Trace *t);
-    void markerAdded(TraceMarker *m);
-    void markerRemoved(TraceMarker *m);
+    void markerAdded(Marker *m);
+    void markerRemoved(Marker *m);
+    void markerFormatChanged(Marker *m);
 
 private:
     QString _name;
@@ -161,7 +176,7 @@ private:
     bool timeDomain;
     QString filename;
     unsigned int fileParemeter;
-    std::set<TraceMarker*> markers;
+    std::set<Marker*> markers;
     struct {
         union {
             Protocol::SweepSettings VNA;

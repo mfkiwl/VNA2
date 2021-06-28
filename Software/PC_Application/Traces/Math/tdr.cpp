@@ -6,6 +6,8 @@
 #include <QLabel>
 #include <QDebug>
 #include "ui_tdrexplanationwidget.h"
+#include "Util/util.h"
+
 using namespace Math;
 using namespace std;
 
@@ -93,7 +95,7 @@ void TDR::edit()
 
     ui->manualMag->setUnit("dBm");
     ui->manualMag->setPrecision(3);
-    ui->manualMag->setValue(20*log10(abs(manualDC)));
+    ui->manualMag->setValue(Util::SparamTodB(manualDC));
     ui->manualPhase->setUnit("°");
     ui->manualPhase->setPrecision(4);
     ui->manualPhase->setValue(180.0/M_PI * arg(manualDC));
@@ -157,6 +159,18 @@ void TDR::fromJSON(nlohmann::json j)
         } else {
             stepResponse = false;
         }
+    }
+}
+
+void TDR::setMode(Mode m)
+{
+    if(mode == m) {
+        // already set to correct mode
+        return;
+    }
+    mode = m;
+    if(input) {
+        inputSamplesChanged(0, input->rData().size());
     }
 }
 

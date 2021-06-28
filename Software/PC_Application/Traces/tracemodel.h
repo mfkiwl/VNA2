@@ -7,6 +7,8 @@
 #include "Device/device.h"
 #include "savable.h"
 
+class MarkerModel;
+
 class TraceModel : public QAbstractTableModel, public Savable
 {
     Q_OBJECT
@@ -40,6 +42,9 @@ public:
     virtual nlohmann::json toJSON() override;
     virtual void fromJSON(nlohmann::json j) override;
 
+    MarkerModel *getMarkerModel() const;
+    void setMarkerModel(MarkerModel *value);
+
 signals:
     void SpanChanged(double fmin, double fmax);
     void traceAdded(Trace *t);
@@ -48,12 +53,13 @@ signals:
     void traceNameChanged(Trace *t);
 
 public slots:
-    void clearVNAData();
+    void clearLiveData();
     void addVNAData(const Protocol::Datapoint& d, const Protocol::SweepSettings& settings);
     void addSAData(const Protocol::SpectrumAnalyzerResult& d, const Protocol::SpectrumAnalyzerSettings& settings);
 
 private:
     std::vector<Trace*> traces;
+    MarkerModel *markerModel;
 };
 
 #endif // TRACEMODEL_H

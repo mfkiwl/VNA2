@@ -30,7 +30,7 @@
 #include "CustomWidgets/tilewidget.h"
 #include "CustomWidgets/siunitedit.h"
 #include <QDockWidget>
-#include "Traces/markerwidget.h"
+#include "Traces/Marker/markerwidget.h"
 #include "Tools/impedancematchdialog.h"
 #include "Calibration/calibrationtracedialog.h"
 #include "ui_main.h"
@@ -46,7 +46,10 @@
 #include "SpectrumAnalyzer/spectrumanalyzer.h"
 #include "Calibration/sourcecaldialog.h"
 #include "Calibration/receivercaldialog.h"
+#include "Calibration/frequencycaldialog.h"
 #include <QDebug>
+#include "CustomWidgets/jsonpickerdialog.h"
+#include <QCommandLineParser>
 
 using namespace std;
 
@@ -54,16 +57,44 @@ AppWindow::AppWindow(QWidget *parent)
     : QMainWindow(parent)
     , deviceActionGroup(new QActionGroup(this))
     , ui(new Ui::MainWindow)
+    , server(nullptr)
 {
-    QCoreApplication::setOrganizationName("VNA");
-    QCoreApplication::setApplicationName("Application");
+    QCoreApplication::setOrganizationName("LibreVNA");
+    QCoreApplication::setApplicationName("LibreVNA-GUI");
+    auto commit = QString(GITHASH);
+    commit.truncate(7);
+    QCoreApplication::setApplicationVersion(QString::number(FW_MAJOR) + "." + QString::number(FW_MINOR)
+                                            + "." + QString::number(FW_PATCH) + FW_SUFFIX + " ("+ commit+")");
 
     qSetMessagePattern("%{time process}: [%{type}] %{message}");
 
+//    qDebug().setVerbosity(0);
     qDebug() << "Application start";
+
+    parser.setApplicationDescription("LibreVNA-GUI");
+    parser.addHelpOption();
+    parser.addVersionOption();
+    parser.addOption(QCommandLineOption({"p","port"}, "Specify port to listen for SCPI commands", "port"));
+    parser.addOption(QCommandLineOption({"d","device"}, "Only allow connections to the specified device", "device"));
+    parser.addOption(QCommandLineOption("no-gui", "Disables the graphical interface"));
+
+    parser.process(QCoreApplication::arguments());
 
     Preferences::getInstance().load();
     device = nullptr;
+
+    if(parser.isSet("port")) {
+        bool OK;
+        auto port = parser.value("port").toUInt(&OK);
+        if(!OK) {
+            // set default port
+            port = Preferences::getInstance().General.SCPI.port;
+        }
+        StartTCPServer(port);
+        Preferences::getInstance().manualTCPport();
+    } else if(Preferences::getInstance().General.SCPI.enabled) {
+        StartTCPServer(Preferences::getInstance().General.SCPI.port);
+    }
 
     ui->setupUi(this);
     ui->statusbar->addWidget(&lConnectionStatus);
@@ -147,25 +178,36 @@ AppWindow::AppWindow(QWidget *parent)
         file.close();
         LoadSetup(j);
     });
+    connect(ui->actionSave_image, &QAction::triggered, [=](){
+        Mode::getActiveMode()->saveSreenshot();
+    });
 
     connect(ui->actionManual_Control, &QAction::triggered, this, &AppWindow::StartManualControl);
     connect(ui->actionFirmware_Update, &QAction::triggered, this, &AppWindow::StartFirmwareUpdateDialog);
     connect(ui->actionSource_Calibration, &QAction::triggered, this, &AppWindow::SourceCalibrationDialog);
     connect(ui->actionReceiver_Calibration, &QAction::triggered, this, &AppWindow::ReceiverCalibrationDialog);
+    connect(ui->actionFrequency_Calibration, &QAction::triggered, this, &AppWindow::FrequencyCalibrationDialog);
     connect(ui->actionPreferences, &QAction::triggered, [=](){
-        Preferences::getInstance().edit();
+        // save previous SCPI settings in case they change
+        auto &p = Preferences::getInstance();
+        auto SCPIenabled = p.General.SCPI.enabled;
+        auto SCPIport = p.General.SCPI.port;
+        p.edit();
+        if(SCPIenabled != p.General.SCPI.enabled || SCPIport != p.General.SCPI.port) {
+            StopTCPServer();
+            if(p.General.SCPI.enabled) {
+                StartTCPServer(p.General.SCPI.port);
+            }
+        }
         // settings might have changed, update necessary stuff
 //        TraceXYPlot::updateGraphColors();
     });
     connect(ui->actionAbout, &QAction::triggered, [=](){
-        auto commit = QString(GITHASH);
-        commit.truncate(7);
-        QMessageBox::about(this, "About", "More information: github.com/jankae/VNA2\n"
-                           "\nVersion: " + QString::number(FW_MAJOR) + "." + QString::number(FW_MINOR)
-                           + "." + QString::number(FW_PATCH) + FW_SUFFIX + " ("+ commit+")");
+        QMessageBox::about(this, "About", "More information: github.com/jankae/LibreVNA\n"
+                           "\nVersion: " + QCoreApplication::applicationVersion());
     });
 
-    setWindowTitle("VNA");
+    setWindowTitle("LibreVNA-GUI");
 
     setCorner(Qt::TopLeftCorner, Qt::LeftDockWidgetArea);
     setCorner(Qt::BottomLeftCorner, Qt::LeftDockWidgetArea);
@@ -176,6 +218,8 @@ AppWindow::AppWindow(QWidget *parent)
         QSettings settings;
         restoreGeometry(settings.value("geometry").toByteArray());
     }
+
+    SetupSCPI();
 
     // Set default mode
     vna->activate();
@@ -190,10 +234,15 @@ AppWindow::AppWindow(QWidget *parent)
         // at least one device available
         ConnectToDevice();
     }
+    if(!parser.isSet("no-gui")) {
+        resize(1280, 800);
+        show();
+    }
 }
 
 AppWindow::~AppWindow()
 {
+    StopTCPServer();
     delete ui;
 }
 
@@ -213,7 +262,7 @@ void AppWindow::closeEvent(QCloseEvent *event)
     QMainWindow::closeEvent(event);
 }
 
-void AppWindow::ConnectToDevice(QString serial)
+bool AppWindow::ConnectToDevice(QString serial)
 {
     if(serial.isEmpty()) {
         qDebug() << "Trying to connect to any device";
@@ -244,6 +293,7 @@ void AppWindow::ConnectToDevice(QString serial)
         ui->actionFirmware_Update->setEnabled(true);
         ui->actionSource_Calibration->setEnabled(true);
         ui->actionReceiver_Calibration->setEnabled(true);
+        ui->actionFrequency_Calibration->setEnabled(true);
 
         Mode::getActiveMode()->initializeDevice();
         UpdateReference();
@@ -256,10 +306,12 @@ void AppWindow::ConnectToDevice(QString serial)
                 break;
             }
         }
+        return true;
     } catch (const runtime_error &e) {
         qWarning() << "Failed to connect:" << e.what();
         DisconnectDevice();
         UpdateDeviceList();
+        return false;
     }
 }
 
@@ -272,6 +324,7 @@ void AppWindow::DisconnectDevice()
     ui->actionFirmware_Update->setEnabled(false);
     ui->actionSource_Calibration->setEnabled(false);
     ui->actionReceiver_Calibration->setEnabled(false);
+    ui->actionFrequency_Calibration->setEnabled(false);
     for(auto a : deviceActionGroup->actions()) {
         a->setChecked(false);
     }
@@ -314,6 +367,187 @@ void AppWindow::CreateToolbars()
     tb_reference->setObjectName("Reference Toolbar");
 }
 
+void AppWindow::SetupSCPI()
+{
+    scpi.add(new SCPICommand("*IDN", nullptr, [=](QStringList){
+        return "LibreVNA-GUI";
+    }));
+    auto scpi_dev = new SCPINode("DEVice");
+    scpi.add(scpi_dev);
+    scpi_dev->add(new SCPICommand("DISConnect", [=](QStringList params) -> QString {
+        Q_UNUSED(params)
+        DisconnectDevice();
+        return "";
+    }, nullptr));
+    scpi_dev->add(new SCPICommand("CONNect", [=](QStringList params) -> QString {
+        QString serial;
+        if(params.size() > 0) {
+            serial = params[0];
+        }
+        if(!ConnectToDevice(serial)) {
+            return "Device not found";
+        } else {
+            return "";
+        }
+    }, [=](QStringList) -> QString {
+        if(device) {
+            return device->serial();
+        } else {
+            return "Not connected";
+        }
+    }));
+    scpi_dev->add(new SCPICommand("LIST", nullptr, [=](QStringList) -> QString {
+        QString ret;
+        for(auto d : Device::GetDevices()) {
+            ret += d + ",";
+        }
+        // remove last comma
+        ret.chop(1);
+        return ret;
+    }));
+    auto scpi_ref = new SCPINode("REFerence");
+    scpi_dev->add(scpi_ref);
+    scpi_ref->add(new SCPICommand("OUT", [=](QStringList params) -> QString {
+        if(params.size() != 1) {
+            return "ERROR";
+        } else if(params[0] == "0" || params[0] == "OFF") {
+            toolbars.reference.outFreq->setCurrentIndex(0);
+        } else if(params[0] == "10") {
+            toolbars.reference.outFreq->setCurrentIndex(1);
+        } else if(params[0] == "100") {
+            toolbars.reference.outFreq->setCurrentIndex(2);
+        } else {
+            return "ERROR";
+        }
+        return "";
+    }, [=](QStringList) -> QString {
+        switch(toolbars.reference.outFreq->currentIndex()) {
+        case 0: return "OFF";
+        case 1: return "10";
+        case 2: return "100";
+        default: return "ERROR";
+        }
+    }));
+    scpi_ref->add(new SCPICommand("IN", [=](QStringList params) -> QString {
+        if(params.size() != 1) {
+            return "ERROR";
+        } else if(params[0] == "INT") {
+            toolbars.reference.type->setCurrentIndex(0);
+        } else if(params[0] == "EXT") {
+            toolbars.reference.type->setCurrentIndex(1);
+        } else if(params[0] == "AUTO") {
+            toolbars.reference.type->setCurrentIndex(2);
+        } else {
+            return "ERROR";
+        }
+        return "";
+    }, [=](QStringList) -> QString {
+        switch(Device::Info().extRefInUse) {
+        case 0: return "INT";
+        case 1: return "EXT";
+        default: return "ERROR";
+        }
+    }));
+    scpi_dev->add(new SCPICommand("MODE", [=](QStringList params) -> QString {
+        if (params.size() != 1) {
+            return "ERROR";
+        }
+        if (params[0] == "VNA") {
+            vna->activate();
+        } else if(params[0] == "GEN") {
+            generator->activate();
+        } else if(params[0] == "SA") {
+            spectrumAnalyzer->activate();
+        } else {
+            return "INVALID MDOE";
+        }
+        return "";
+    }, [=](QStringList) -> QString {
+        auto active = Mode::getActiveMode();
+        if(active == vna) {
+            return "VNA";
+        } else if(active == generator) {
+            return "GEN";
+        } else if(active == spectrumAnalyzer) {
+            return "SA";
+        } else {
+            return "ERROR";
+        }
+    }));
+    auto scpi_status = new SCPINode("STAtus");
+    scpi_dev->add(scpi_status);
+    scpi_status->add(new SCPICommand("UNLOcked", nullptr, [=](QStringList){
+        bool locked = Device::Info().source_locked && Device::Info().LO1_locked;
+        return locked ? "FALSE" : "TRUE";
+    }));
+    scpi_status->add(new SCPICommand("ADCOVERload", nullptr, [=](QStringList){
+        return Device::Info().ADC_overload ? "TRUE" : "FALSE";
+    }));
+    scpi_status->add(new SCPICommand("UNLEVel", nullptr, [=](QStringList){
+        return Device::Info().unlevel ? "TRUE" : "FALSE";
+    }));
+    auto scpi_info = new SCPINode("INFo");
+    scpi_dev->add(scpi_info);
+    scpi_info->add(new SCPICommand("FWREVision", nullptr, [=](QStringList){
+        return QString::number(Device::Info().FW_major)+"."+QString::number(Device::Info().FW_minor)+"."+QString::number(Device::Info().FW_patch);
+    }));
+    scpi_info->add(new SCPICommand("HWREVision", nullptr, [=](QStringList){
+        return QString(Device::Info().HW_Revision);
+    }));
+    scpi_info->add(new SCPICommand("TEMPeratures", nullptr, [=](QStringList){
+        return QString::number(Device::Info().temp_source)+"/"+QString::number(Device::Info().temp_LO1)+"/"+QString::number(Device::Info().temp_MCU);
+    }));
+    auto scpi_limits = new SCPINode("LIMits");
+    scpi_info->add(scpi_limits);
+    scpi_limits->add(new SCPICommand("MINFrequency", nullptr, [=](QStringList){
+        return QString::number(Device::Info().limits_minFreq);
+    }));
+    scpi_limits->add(new SCPICommand("MAXFrequency", nullptr, [=](QStringList){
+        return QString::number(Device::Info().limits_maxFreq);
+    }));
+    scpi_limits->add(new SCPICommand("MINIFBW", nullptr, [=](QStringList){
+        return QString::number(Device::Info().limits_minIFBW);
+    }));
+    scpi_limits->add(new SCPICommand("MAXIFBW", nullptr, [=](QStringList){
+        return QString::number(Device::Info().limits_maxIFBW);
+    }));
+    scpi_limits->add(new SCPICommand("MAXPoints", nullptr, [=](QStringList){
+        return QString::number(Device::Info().limits_maxPoints);
+    }));
+    scpi_limits->add(new SCPICommand("MINPOWer", nullptr, [=](QStringList){
+        return QString::number(Device::Info().limits_cdbm_min / 100.0);
+    }));
+    scpi_limits->add(new SCPICommand("MAXPOWer", nullptr, [=](QStringList){
+        return QString::number(Device::Info().limits_cdbm_max / 100.0);
+    }));
+    scpi_limits->add(new SCPICommand("MINRBW", nullptr, [=](QStringList){
+        return QString::number(Device::Info().limits_minRBW);
+    }));
+    scpi_limits->add(new SCPICommand("MAXRBW", nullptr, [=](QStringList){
+        return QString::number(Device::Info().limits_maxRBW);
+    }));
+    scpi_limits->add(new SCPICommand("MAXHARMonicfrequency", nullptr, [=](QStringList){
+        return QString::number(Device::Info().limits_maxFreqHarmonic);
+    }));
+
+    scpi.add(vna);
+    scpi.add(generator);
+    scpi.add(spectrumAnalyzer);
+}
+
+void AppWindow::StartTCPServer(int port)
+{
+    server = new TCPServer(port);
+    connect(server, &TCPServer::received, &scpi, &SCPI::input);
+    connect(&scpi, &SCPI::output, server, &TCPServer::send);
+}
+
+void AppWindow::StopTCPServer()
+{
+    delete server;
+    server = nullptr;
+}
+
 int AppWindow::UpdateDeviceList()
 {
     deviceActionGroup->setExclusive(true);
@@ -322,8 +556,13 @@ int AppWindow::UpdateDeviceList()
     if(device) {
         devices.insert(device->serial());
     }
+    int available = 0;
     if(devices.size()) {
         for(auto d : devices) {
+            if(!parser.value("device").isEmpty() && parser.value("device") != d) {
+                // specified device does not match, ignore
+                continue;
+            }
             auto connectAction = ui->menuConnect_to->addAction(d);
             connectAction->setCheckable(true);
             connectAction->setActionGroup(deviceActionGroup);
@@ -333,14 +572,15 @@ int AppWindow::UpdateDeviceList()
             connect(connectAction, &QAction::triggered, [this, d]() {
                ConnectToDevice(d);
             });
+            ui->menuConnect_to->setEnabled(true);
+            available++;
         }
-        ui->menuConnect_to->setEnabled(true);
     } else {
         // no devices available, disable connection option
         ui->menuConnect_to->setEnabled(false);
     }
-    qDebug() << "Updated device list, found" << devices.size();
-    return devices.size();
+    qDebug() << "Updated device list, found" << available;
+    return available;
 }
 
 void AppWindow::StartManualControl()
@@ -418,6 +658,12 @@ void AppWindow::ReceiverCalibrationDialog()
     d->exec();
 }
 
+void AppWindow::FrequencyCalibrationDialog()
+{
+    auto d = new FrequencyCalDialog(device);
+    d->exec();
+}
+
 nlohmann::json AppWindow::SaveSetup()
 {
     nlohmann::json j;
@@ -429,6 +675,8 @@ nlohmann::json AppWindow::SaveSetup()
 
 void AppWindow::LoadSetup(nlohmann::json j)
 {
+//    auto d = new JSONPickerDialog(j);
+//    d->exec();
     vna->fromJSON(j["VNA"]);
     generator->fromJSON(j["Generator"]);
     spectrumAnalyzer->fromJSON(j["SpectrumAnalyzer"]);

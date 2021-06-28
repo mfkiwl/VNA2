@@ -1,9 +1,9 @@
+#include <Cal.hpp>
 #include "Generator.hpp"
 #include "Manual.hpp"
 #include "Hardware.hpp"
 #include "max2871.hpp"
 #include "Si5351C.hpp"
-#include "AmplitudeCal.hpp"
 
 void Generator::Setup(Protocol::GeneratorSettings g) {
 	if(g.activePort == 0) {
@@ -35,8 +35,8 @@ void Generator::Setup(Protocol::GeneratorSettings g) {
 		m.PortSwitch = 1;
 		break;
 	}
+	g.frequency = Cal::FrequencyCorrectionToDevice(g.frequency);
 	auto amplitude = HW::GetAmplitudeSettings(g.cdbm_level, g.frequency, g.applyAmplitudeCorrection, g.activePort == 2);
-	HW::SetOutputUnlevel(amplitude.unlevel);
 	// Select correct source
 	if(g.frequency < HW::BandSwitchFrequency) {
 		m.SourceLowEN = 1;
@@ -71,4 +71,5 @@ void Generator::Setup(Protocol::GeneratorSettings g) {
 
 	m.attenuator = amplitude.attenuator;
 	Manual::Setup(m);
+	HW::SetOutputUnlevel(amplitude.unlevel);
 }

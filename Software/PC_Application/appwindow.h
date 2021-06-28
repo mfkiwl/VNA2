@@ -11,13 +11,16 @@
 #include "Calibration/calibration.h"
 #include <QProgressDialog>
 #include "Traces/tracemodel.h"
-#include "Traces/tracemarkermodel.h"
+#include "Traces/Marker/markermodel.h"
 #include "averaging.h"
 #include "Device/devicelog.h"
 #include "preferences.h"
 #include <QButtonGroup>
 #include <QCheckBox>
 #include <QLabel>
+#include <QCommandLineParser>
+#include "scpi.h"
+#include "tcpserver.h"
 
 namespace Ui {
 class MainWindow;
@@ -41,7 +44,7 @@ public:
 protected:
     void closeEvent(QCloseEvent *event) override;
 private slots:
-    void ConnectToDevice(QString serial = QString());
+    bool ConnectToDevice(QString serial = QString());
     void DisconnectDevice();
     int UpdateDeviceList();
     void StartManualControl();
@@ -50,11 +53,15 @@ private slots:
     void DeviceNeedsUpdate(int reported, int expected);
     void SourceCalibrationDialog();
     void ReceiverCalibrationDialog();
+    void FrequencyCalibrationDialog();
     nlohmann::json SaveSetup();
     void LoadSetup(nlohmann::json j);
 private:
     void DeviceConnectionLost();
     void CreateToolbars();
+    void SetupSCPI();
+    void StartTCPServer(int port);
+    void StopTCPServer();
 
     QStackedWidget *central;
 
@@ -84,6 +91,10 @@ private:
     QLabel lUnlock;
 
     Ui::MainWindow *ui;
+    QCommandLineParser parser;
+
+    SCPI scpi;
+    TCPServer *server;
 };
 
 #endif // VNA_H

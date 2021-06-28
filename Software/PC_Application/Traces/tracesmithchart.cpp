@@ -2,11 +2,12 @@
 #include <QPainter>
 #include <array>
 #include <math.h>
-#include "tracemarker.h"
+#include "Marker/marker.h"
 #include <QDebug>
 #include "preferences.h"
 #include "ui_smithchartdialog.h"
 #include "unit.h"
+#include "QFileDialog"
 
 using namespace std;
 
@@ -81,7 +82,7 @@ std::complex<double> TraceSmithChart::pixelToData(QPoint p)
     return complex<double>(data.x() / smithCoordMax, -data.y() / smithCoordMax);
 }
 
-QPoint TraceSmithChart::markerToPixel(TraceMarker *m)
+QPoint TraceSmithChart::markerToPixel(Marker *m)
 {
     QPoint ret = QPoint();
 //    if(!m->isTimeDomain()) {
@@ -93,7 +94,7 @@ QPoint TraceSmithChart::markerToPixel(TraceMarker *m)
     return ret;
 }
 
-double TraceSmithChart::nearestTracePoint(Trace *t, QPoint pixel)
+double TraceSmithChart::nearestTracePoint(Trace *t, QPoint pixel, double *distance)
 {
     double closestDistance = numeric_limits<double>::max();
     unsigned int closestIndex = 0;
@@ -111,7 +112,24 @@ double TraceSmithChart::nearestTracePoint(Trace *t, QPoint pixel)
             closestIndex = i;
         }
     }
+    if(distance) {
+        *distance = closestDistance;
+    }
     return t->sample(closestIndex).x;
+}
+
+bool TraceSmithChart::xCoordinateVisible(double x)
+{
+    if(limitToSpan) {
+        if(x >= sweep_fmin && x <= sweep_fmax) {
+            return true;
+        } else {
+            return false;
+        }
+    } else {
+        // complete traces visible
+        return true;
+    }
 }
 
 void TraceSmithChart::draw(QPainter &p) {
@@ -249,37 +267,50 @@ QString TraceSmithChart::mouseText(QPoint pos)
     }
 }
 
-//void TraceSmithChart::paintEvent(QPaintEvent * /* the event */)
-//{
-//    auto pref = Preferences::getInstance();
-//    QPainter painter(this);
-//    painter.setRenderHint(QPainter::Antialiasing);
-//    painter.setBackground(QBrush(pref.General.graphColors.background));
-//    painter.fillRect(0, 0, width(), height(), QBrush(pref.General.graphColors.background));
-
-//    double side = qMin(width(), height()) * screenUsage;
-
-//    //painter.setViewport((width()-side)/2, (height()-side)/2, side, side);
-//    //painter.setWindow(-smithCoordMax, -smithCoordMax, 2*smithCoordMax, 2*smithCoordMax);
-
-//    plotToPixelXOffset = width()/2;
-//    plotToPixelYOffset = height()/2;
-//    plotToPixelXScale = side/2;
-//    plotToPixelYScale = -side/2;
-
-//    draw(painter, 2*smithCoordMax/side);
-//}
-
 void TraceSmithChart::updateContextMenu()
 {
-    contextmenu->clear();
     contextmenu->clear();
     auto setup = new QAction("Setup...", contextmenu);
     connect(setup, &QAction::triggered, this, &TraceSmithChart::axisSetupDialog);
     contextmenu->addAction(setup);
+
+    contextmenu->addSeparator();
+    auto image = new QAction("Save image...", contextmenu);
+    contextmenu->addAction(image);
+    connect(image, &QAction::triggered, [=]() {
+        auto filename = QFileDialog::getSaveFileName(nullptr, "Save plot image", "", "PNG image files (*.png)", nullptr, QFileDialog::DontUseNativeDialog);
+        if(filename.isEmpty()) {
+            // aborted selection
+            return;
+        }
+        if(filename.endsWith(".png")) {
+            filename.chop(4);
+        }
+        filename += ".png";
+        grab().save(filename);
+    });
+
+    auto createMarker = contextmenu->addAction("Add marker here");
+    bool activeTraces = false;
+    for(auto t : traces) {
+        if(t.second) {
+            activeTraces = true;
+            break;
+        }
+    }
+    if(!activeTraces) {
+        createMarker->setEnabled(false);
+    }
+    connect(createMarker, &QAction::triggered, [=](){
+        createMarkerAtPosition(contextmenuClickpoint);
+    });
+
     contextmenu->addSection("Traces");
     // Populate context menu
     for(auto t : traces) {
+        if(!supported(t.first)) {
+            continue;
+        }
         auto action = new QAction(t.first->name(), contextmenu);
         action->setCheckable(true);
         if(t.second) {
@@ -290,6 +321,7 @@ void TraceSmithChart::updateContextMenu()
         });
         contextmenu->addAction(action);
     }
+
     contextmenu->addSeparator();
     auto close = new QAction("Close", contextmenu);
     contextmenu->addAction(close);
